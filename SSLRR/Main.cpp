@@ -19,10 +19,17 @@ HWND SShwnd;	// game hwnd
 HWND RRhwnd;	// ruler hwnd
 HDC SSdc;		// game device context
 
+bool offStandby = true;
 LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam);
+INPUT ip;
+void simKey(int vk, bool press);
 
 int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR cmdLine, INT cmdCount) {
-	cout << "sdfsdf";
+
+	ip.type = INPUT_KEYBOARD;
+	ip.ki.wScan = 0;
+	ip.ki.time = 0;
+	ip.ki.dwExtraInfo = 0;
 
 	SShwnd = FindWindow(nullptr, L"ShellShock Live");
 	if (!SShwnd) {
@@ -34,7 +41,7 @@ int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR c
 	MoveWindow(SShwnd, 0, 0, SSwid, SShgt, false);
 
 	SSdc = GetDC(SShwnd);
-	
+
 	WNDCLASS wc{};
 	wc.hInstance = currentInstance;
 	wc.lpszClassName = L"SSLRR";
@@ -47,7 +54,7 @@ int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR c
 		nullptr, nullptr, nullptr, nullptr);
 	if (!RRhwnd) return 1;
 	MoveWindow(RRhwnd, 0, 0, SSwid + 120, SShgt + 50, true);
-	
+
 	MSG msg{};
 	while (GetMessage(&msg, nullptr, 0, 0)) {
 		TranslateMessage(&msg);
@@ -57,10 +64,48 @@ int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR c
 	return 0;
 }
 
+//            a    d    w    s
+int vks[] = { 0x41,0x44,0x57,0x53 };
+bool isDown[] = { 0, 0, 0, 0 };
+bool wasUp[] = { 1, 1, 1, 1 };
+bool keyActive = false;
+
+bool processKeys() {
+	bool anyKey = false;
+	for (int i = 0; i < 4; ++i) {
+		isDown[i] = GetAsyncKeyState(vks[i]) & 0x8000;
+		if (isDown[i]) anyKey = true;
+	}
+
+	if (anyKey && !keyActive) {
+		SetForegroundWindow(SShwnd);
+		keyActive = true;
+	}
+
+	for (int i = 0; i < 4; ++i) {
+		if (isDown[i] && wasUp[i]) {
+			simKey(vks[i], true);
+			wasUp[i] = false;
+		}
+		else if (!isDown[i] && !wasUp[i]) {
+			simKey(vks[i], false);
+			wasUp[i] = true;
+		}
+	}
+
+	if (!anyKey && keyActive) {
+		keyActive = false;
+		offStandby = true; //update screen asap
+		SetForegroundWindow(RRhwnd);
+	}
+
+	return anyKey;
+}
+
 LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 	switch (msg) {
 	case WM_CREATE:
-		SetTimer(hwnd, 1, 30, NULL); // 30 ms
+		SetTimer(hwnd, 1, 16, NULL); // 16 ms
 		return 0;
 
 	case WM_DESTROY:
@@ -69,18 +114,64 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 		return 0;
 
 	case WM_TIMER:
-		InvalidateRect(hwnd, nullptr, false);
+		if (!processKeys()) {
+			if (offStandby) { // update screen every other time
+				InvalidateRect(hwnd, nullptr, false);
+				offStandby = false;
+			}
+			else offStandby = true;
+		}
 		return 0;
 
 	case WM_PAINT:
+		HDC hdc;
 		PAINTSTRUCT ps;
-		HDC hdc = BeginPaint(hwnd, &ps);
-		
+		hdc = BeginPaint(hwnd, &ps);
+
 		BitBlt(hdc, 0, 0, SSwid, SShgt, SSdc, 0, 0, SRCCOPY);
 
 		EndPaint(hwnd, &ps);
 		return 0;
-	}
 
-	return DefWindowProc(hwnd, msg, param, lparam);
+	case WM_LBUTTONDOWN:
+		SendMessage(SShwnd, WM_LBUTTONDOWN, param, lparam);
+		return 0;
+
+	case WM_LBUTTONUP:
+		SendMessage(SShwnd, WM_LBUTTONUP, param, lparam);
+		return 0;
+
+	case WM_KEYDOWN:
+		/*INPUT ip;
+		ip.type = INPUT_KEYBOARD;
+		ip.ki.wScan = 0; // hardware scan code for key
+		ip.ki.time = 0;
+		ip.ki.dwExtraInfo = 0;
+		ip.ki.wVk = 0x41;
+		ip.ki.dwFlags = 0; // 0 for key press*/
+		//SetForegroundWindow(SShwnd);
+		//SendInput(1, &ip, sizeof(INPUT));
+		PostMessage(SShwnd, WM_KEYDOWN, param, lparam);
+		return 0;
+
+	case WM_KEYUP:
+		//PostMessage(SShwnd, WM_KEYUP, param, lparam);
+		return 0;
+
+	default:
+		return DefWindowProc(hwnd, msg, param, lparam);
+	}
+}
+
+void simKey(int vk, bool press) {
+	if (press) {
+		ip.ki.wVk = vk;
+		ip.ki.dwFlags = 0;
+		SendInput(1, &ip, sizeof(INPUT));
+	}
+	else {
+		ip.ki.wVk = vk;
+		ip.ki.dwFlags = KEYEVENTF_KEYUP;
+		SendInput(1, &ip, sizeof(INPUT));
+	}
 }
