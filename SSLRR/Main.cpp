@@ -1,3 +1,5 @@
+//https://www.desmos.com/calculator/tpzmmpusro
+
 #include <Windows.h>
 #include <opencv2/opencv.hpp>
 
@@ -8,6 +10,7 @@ unsigned short a = 45;	// in game value: angle
 unsigned short p = 50;	// in game value: power
 unsigned short w = 0;	// in game value: wind
 
+float r = 10;	// tank radius
 float g = 0;	// gravity
 float i = 0;	// cos(a)
 float j = 1;	// sin(a)
@@ -65,41 +68,52 @@ int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR c
 }
 
 //            a    d    w    s
-int vks[] = { 0x41,0x44,0x57,0x53 };
-bool isDown[] = { 0, 0, 0, 0 };
-bool wasUp[] = { 1, 1, 1, 1 };
-bool keyActive = false;
+const int vks[] = { 0x41,0x44,0x57,0x53 };
+bool isDown[] = { 0,0,0,0 };
+bool isSim[] = { 0,0,0,0 };
+bool keyIsDown = false;
+bool keyWasUp = true;
+char debounce;
 
 bool processKeys() {
-	bool anyKey = false;
+	keyIsDown = false;
+
 	for (int i = 0; i < 4; ++i) {
 		isDown[i] = GetAsyncKeyState(vks[i]) & 0x8000;
-		if (isDown[i]) anyKey = true;
-	}
-
-	if (anyKey && !keyActive) {
-		SetForegroundWindow(SShwnd);
-		keyActive = true;
-	}
-
-	for (int i = 0; i < 4; ++i) {
-		if (isDown[i] && wasUp[i]) {
-			simKey(vks[i], true);
-			wasUp[i] = false;
-		}
-		else if (!isDown[i] && !wasUp[i]) {
-			simKey(vks[i], false);
-			wasUp[i] = true;
+		if (isDown[i]) keyIsDown = true;
+		else if (isSim[i]) {
+			isSim[i] = false;
+			simKey(vks[i], false); // release sim (for edge cases)
 		}
 	}
-
-	if (!anyKey && keyActive) {
-		keyActive = false;
-		offStandby = true; //update screen asap
-		SetForegroundWindow(RRhwnd);
+	
+	if (keyIsDown) {
+		if (keyWasUp) { // first keys
+			SetForegroundWindow(SShwnd);
+			keyWasUp = false;
+			for (int i = 0; i < 4; ++i) {
+				if (isDown[i]) {
+					isSim[i] = true;
+					simKey(vks[i], true);
+				}
+			}
+		}
+		debounce = 3; // reset debounce
+		return true;
 	}
-
-	return anyKey;
+	else {
+		if (debounce > 0) { // dont switch yet
+			debounce -= 1;
+			return true;
+		}
+		else if(!keyWasUp) { // switch back
+			keyWasUp = true;
+			offStandby = true; //update screen asap
+			SetForegroundWindow(RRhwnd);
+			return false;
+		}
+		return false;
+	}
 }
 
 LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
@@ -139,23 +153,6 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 
 	case WM_LBUTTONUP:
 		SendMessage(SShwnd, WM_LBUTTONUP, param, lparam);
-		return 0;
-
-	case WM_KEYDOWN:
-		/*INPUT ip;
-		ip.type = INPUT_KEYBOARD;
-		ip.ki.wScan = 0; // hardware scan code for key
-		ip.ki.time = 0;
-		ip.ki.dwExtraInfo = 0;
-		ip.ki.wVk = 0x41;
-		ip.ki.dwFlags = 0; // 0 for key press*/
-		//SetForegroundWindow(SShwnd);
-		//SendInput(1, &ip, sizeof(INPUT));
-		PostMessage(SShwnd, WM_KEYDOWN, param, lparam);
-		return 0;
-
-	case WM_KEYUP:
-		//PostMessage(SShwnd, WM_KEYUP, param, lparam);
 		return 0;
 
 	default:
