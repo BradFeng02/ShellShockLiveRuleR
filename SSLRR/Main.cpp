@@ -68,9 +68,16 @@ int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR c
 }
 
 //            a    d    w    s
-const int vks[] = { 0x41,0x44,0x57,0x53 };
-bool isDown[] = { 0,0,0,0 };
-bool isSim[] = { 0,0,0,0 };
+const int keyCnt = 62;
+const int vks[keyCnt] = { VK_BACK, VK_RETURN, VK_LSHIFT, VK_RSHIFT, VK_LCONTROL, VK_RCONTROL, VK_ESCAPE,
+							VK_SPACE, VK_END, VK_HOME, VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN, VK_DELETE,
+							0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, // 1-9
+							0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, // A-M
+							0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, // N-Z
+							VK_OEM_1, VK_OEM_PLUS, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD,
+							VK_OEM_2, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7 };
+bool isDown[keyCnt] = { 0 };
+bool isSim[keyCnt] = { 0 };
 bool keyIsDown = false;
 bool keyWasUp = true;
 char debounce;
@@ -78,7 +85,7 @@ char debounce;
 bool processKeys() {
 	keyIsDown = false;
 
-	for (int i = 0; i < 4; ++i) {
+	for (int i = 0; i < keyCnt; ++i) {
 		isDown[i] = GetAsyncKeyState(vks[i]) & 0x8000;
 		if (isDown[i]) keyIsDown = true;
 		else if (isSim[i]) {
@@ -86,12 +93,13 @@ bool processKeys() {
 			simKey(vks[i], false); // release sim (for edge cases)
 		}
 	}
-	
+
 	if (keyIsDown) {
 		if (keyWasUp) { // first keys
+			if (GetForegroundWindow() != RRhwnd) return true;
 			SetForegroundWindow(SShwnd);
 			keyWasUp = false;
-			for (int i = 0; i < 4; ++i) {
+			for (int i = 0; i < keyCnt; ++i) {
 				if (isDown[i]) {
 					isSim[i] = true;
 					simKey(vks[i], true);
@@ -106,7 +114,7 @@ bool processKeys() {
 			debounce -= 1;
 			return true;
 		}
-		else if(!keyWasUp) { // switch back
+		else if (!keyWasUp) { // switch back
 			keyWasUp = true;
 			offStandby = true; //update screen asap
 			SetForegroundWindow(RRhwnd);
