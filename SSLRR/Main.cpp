@@ -8,31 +8,50 @@
 
 using namespace std;
 using namespace cv;
+constexpr float PI = 3.141592654f;
+constexpr float DEG2RAD = PI/180.0F;
+constexpr float RAD2DEG = 180.0F/PI;
 
-unsigned short a = 45;	// in game value: angle
-unsigned short p = 50;	// in game value: power
-unsigned short w = 0;	// in game value: wind
+int a = 45;	// in game value: angle
+unsigned short p = 30;	// in game value: power
+short w = 0;	// in game value: wind
 
-float r = 10;	// tank radius
-float g = 0;	// gravity
+constexpr float r = 15;	// tank radius
+constexpr float aimCircle = 578 / 2.5; //aim circle radius
+constexpr float g = -1;	// gravity
 float i = 0;	// cos(a)
 float j = 1;	// sin(a)
 
-const int SSwid = 1350;	// game wid
-const int SShgt = 760;	// game hgt
+constexpr int maxTrajPoints = 100;
+D2D1_POINT_2F trajPoints[maxTrajPoints];
+int trajIndex = 0;
+
+POINT curPos;	// mouse position
+POINT curAim;	// cursor for aiming
+bool aiming = false;	// if click+drag aiming
+POINT tankOrigin = { 100,100 };	// center of tank
+bool centering = false;	// if centering on tank
+
+constexpr int SSwid = 1350;	// game wid
+constexpr int SShgt = 760;	// game hgt
 RECT SSrc; // game client size
 RECT RRrc; // ruler client size
-const int rightPadding = 120;	// right strip wid
-const int bottomPadding = 50;	// bottom strip hgt
+constexpr int rightPadding = 120;	// right strip wid
+constexpr int bottomPadding = 50;	// bottom strip hgt
 
 HWND SShwnd;	// game hwnd
 HWND RRhwnd;	// ruler hwnd
 HDC SSdc;		// game device context
-POINT curPos;	// mouse position
 
 ID2D1DCRenderTarget* d2RenderTarget;
+ID2D1StrokeStyle* dashedStroke;
 ID2D1SolidColorBrush* stripBrush;
 ID2D1SolidColorBrush* redBrush;
+ID2D1SolidColorBrush* greenBrush;
+ID2D1SolidColorBrush* yellowBrush;
+ID2D1SolidColorBrush* purpleBrush;
+ID2D1SolidColorBrush* blueBrush;
+ID2D1SolidColorBrush* pinkBrush;
 
 bool offStandby = true;
 LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam);
@@ -84,6 +103,60 @@ int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR c
 	return 0;
 }
 
+void render(HDC &hdc, PAINTSTRUCT &ps) {
+	float angle = round(atan2(curAim.y - tankOrigin.y, curAim.x - tankOrigin.x)*RAD2DEG);
+
+	a = angle + 90;
+	i = cos(a * DEG2RAD);
+	j = sin(a * DEG2RAD);
+	int t = 0;
+	trajIndex = 0;
+	while (trajIndex < maxTrajPoints) {
+		trajPoints[trajIndex].x = tankOrigin.x + j * r + j * p * t + w * t * t;
+		trajPoints[trajIndex].y = tankOrigin.y - i * r - i * p * t - g * t * t;
+		t += 1;
+		trajIndex += 1;
+	}
+
+	// GDI POINT to d2 point
+	D2D1_POINT_2F curAimPT = { curAim.x,curAim.y };
+	D2D1_POINT_2F tankOriginPT = { tankOrigin.x,tankOrigin.y };
+	D2D1_POINT_2F gameAimPT = { tankOrigin.x + aimCircle * cos(angle * DEG2RAD) ,tankOrigin.y + aimCircle * sin(angle * DEG2RAD) };
+	D2D1_RECT_F bottomStrip = D2D1::RectF(0, ps.rcPaint.bottom - bottomPadding, ps.rcPaint.right, ps.rcPaint.bottom);
+	D2D1_RECT_F rightStrip = D2D1::RectF(ps.rcPaint.right - rightPadding, 0, ps.rcPaint.right, ps.rcPaint.bottom - bottomPadding);
+	D2D1_ELLIPSE tankRadius = { tankOriginPT,r,r };
+	D2D1_ELLIPSE aimRadius = { tankOriginPT,aimCircle,aimCircle };
+	D2D1_ELLIPSE cursorAim = { curAimPT,3,3 };
+
+	d2RenderTarget->BindDC(hdc, &RRrc);
+	d2RenderTarget->BeginDraw();
+
+	// bottom and right strips
+	d2RenderTarget->FillRectangle(&bottomStrip, stripBrush);
+	d2RenderTarget->FillRectangle(&rightStrip, stripBrush);
+
+	for (int i = 0; i < maxTrajPoints-1; ++i) {
+		d2RenderTarget->DrawLine(trajPoints[i], trajPoints[i + 1], redBrush);
+	}
+
+	// tank barrel radius, aim radius
+	d2RenderTarget->DrawEllipse(tankRadius, greenBrush);
+	d2RenderTarget->DrawEllipse(aimRadius, yellowBrush);
+
+	// aim line and point and arc
+	d2RenderTarget->FillEllipse(cursorAim, purpleBrush);
+	d2RenderTarget->DrawLine(tankOriginPT, curAimPT, blueBrush,1.0f,dashedStroke);
+	d2RenderTarget->DrawLine(tankOriginPT, gameAimPT, pinkBrush);
+	//d2RenderTarget->DrawGeometry()
+
+	//D2D1_RECT_F testcur = D2D1::RectF(curAim.x - 10, curAim.y - 10, curAim.x + 10, curAim.y + 10);
+	//D2D1_RECT_F testcur2 = D2D1::RectF(curPos.x - 10, curPos.y - 10, curPos.x + 10, curPos.y + 10);
+	//d2RenderTarget->FillRectangle(&testcur, redBrush);
+	//d2RenderTarget->FillRectangle(&testcur2, redBrush);
+
+	d2RenderTarget->EndDraw();
+}
+
 //            a    d    w    s
 const int keyCnt = 62;
 const int vks[keyCnt] = { VK_BACK, VK_RETURN, VK_LSHIFT, VK_RSHIFT, VK_LCONTROL, VK_RCONTROL, VK_ESCAPE,
@@ -98,7 +171,6 @@ bool isSim[keyCnt] = { 0 };
 bool keyIsDown = false;
 bool keyWasUp = true;
 char debounce;
-
 bool processKeys() {
 	keyIsDown = false;
 
@@ -154,6 +226,19 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 
 	case WM_TIMER:
 		if (!processKeys()) { // if ruler window shown
+			if (centering) {
+				GetCursorPos(&tankOrigin);
+				ScreenToClient(hwnd, &tankOrigin);
+				offStandby = true; // high update rate while centering
+			}
+
+			else if (aiming) {
+				GetCursorPos(&curAim);
+				ScreenToClient(hwnd, &curAim);
+				offStandby = true; // high update rate while aiming
+			}
+
+			//render
 			if (offStandby) { // update screen every other time
 				InvalidateRect(hwnd, nullptr, false);
 				offStandby = false;
@@ -166,41 +251,30 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 		HDC hdc;
 		PAINTSTRUCT ps;
 		hdc = BeginPaint(hwnd, &ps);
-		//d2RenderTarget->BeginDraw();
 
 		BitBlt(hdc, 0, 0, SSrc.right - SSrc.left, SSrc.bottom - SSrc.top, SSdc, 0, 0, SRCCOPY);
+		render(hdc, ps);
 
-		GetCursorPos(&curPos);
-		ScreenToClient(hwnd, &curPos);
-
-		//std::this_thread::sleep_for(std::chrono::milliseconds(15));
-		d2RenderTarget->BindDC(hdc, &RRrc);
-		d2RenderTarget->BeginDraw();
-
-		//d2RenderTarget->SetTransform(D2D1::Matrix3x2F::Identity());
-		//d2RenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
-		
-		D2D1_RECT_F bottomStrip = D2D1::RectF(0, ps.rcPaint.bottom - bottomPadding, ps.rcPaint.right, ps.rcPaint.bottom);
-		D2D1_RECT_F rightStrip = D2D1::RectF(ps.rcPaint.right - rightPadding, 0, ps.rcPaint.right, ps.rcPaint.bottom - bottomPadding);
-
-		D2D1_RECT_F testcur = D2D1::RectF(curPos.x - 10, curPos.y - 10, curPos.x + 10, curPos.y + 10);
-		
-		d2RenderTarget->FillRectangle(&bottomStrip, stripBrush);
-		d2RenderTarget->FillRectangle(&rightStrip, stripBrush);
-
-		d2RenderTarget->FillRectangle(&testcur, redBrush);
-
-		d2RenderTarget->EndDraw();
 		EndPaint(hwnd, &ps);
 
 		return 0;
 
 	case WM_LBUTTONDOWN:
 		SendMessage(SShwnd, WM_LBUTTONDOWN, param, lparam);
+		aiming = true;
 		return 0;
 
 	case WM_LBUTTONUP:
 		SendMessage(SShwnd, WM_LBUTTONUP, param, lparam);
+		aiming = false;
+		return 0;
+
+	case WM_KEYDOWN:
+		if (param == VK_TAB) centering = true;
+		return 0;
+
+	case WM_KEYUP:
+		if (param == VK_TAB) centering = false;
 		return 0;
 
 	default:
@@ -221,14 +295,20 @@ void simKey(int vk, bool press) {
 	}
 }
 
+
+float dashes[2] = { r,r };
 void setupD2D() {
 	ID2D1Factory* d2Factory;
 	D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &d2Factory);
-	
+
 	auto props = D2D1::RenderTargetProperties();
 	props.pixelFormat = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
 
 	d2Factory->CreateDCRenderTarget(&props, &d2RenderTarget);
+
+	d2Factory->CreateStrokeStyle(D2D1::StrokeStyleProperties(
+		D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_FLAT,
+		D2D1_LINE_JOIN_MITER,10.0F, D2D1_DASH_STYLE_CUSTOM,0.0f), dashes, 2, &dashedStroke);
 
 	d2RenderTarget->CreateSolidColorBrush(
 		D2D1::ColorF(D2D1::ColorF::DarkGray),
@@ -237,6 +317,27 @@ void setupD2D() {
 	d2RenderTarget->CreateSolidColorBrush(
 		D2D1::ColorF(D2D1::ColorF::IndianRed),
 		&redBrush
+	);
+	d2RenderTarget->CreateSolidColorBrush(
+		D2D1::ColorF(D2D1::ColorF::MediumPurple),
+		&purpleBrush
+	);
+	d2RenderTarget->CreateSolidColorBrush(
+		D2D1::ColorF(D2D1::ColorF::ForestGreen),
+		&greenBrush
+	);
+	d2RenderTarget->CreateSolidColorBrush(
+		D2D1::ColorF(D2D1::ColorF::Yellow),
+		&yellowBrush
+	);
+	yellowBrush->SetOpacity(0.5);
+	d2RenderTarget->CreateSolidColorBrush(
+		D2D1::ColorF(D2D1::ColorF::DodgerBlue),
+		&blueBrush
+	);
+	d2RenderTarget->CreateSolidColorBrush(
+		D2D1::ColorF(D2D1::ColorF::DeepPink),
+		&pinkBrush
 	);
 
 	d2Factory->Release();
