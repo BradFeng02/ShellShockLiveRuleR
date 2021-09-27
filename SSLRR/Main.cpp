@@ -133,7 +133,7 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 		trajPoints[trajIndex].y = ay;
 
 		// enough drawn
-		if (ax<0 || ax>ps.rcPaint.right) {
+		if (ax<0 || ax>ps.rcPaint.right || ay < -1000 || ay>1000) {
 			usedTrajCnt = trajIndex;
 			break;
 		}
@@ -177,8 +177,8 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 	d2RenderTarget->FillRectangle(&rightStrip, stripBrush);
 
 	for (int i = 0; i < usedTrajCnt; ++i) {
-		D2D1_ELLIPSE debugDot = { trajPoints[i],1,1 };
-		d2RenderTarget->DrawEllipse(debugDot, stripBrush);
+		// D2D1_ELLIPSE debugDot = { trajPoints[i],1,1 };
+		// d2RenderTarget->DrawEllipse(debugDot, stripBrush);
 		d2RenderTarget->DrawLine(trajPoints[i], trajPoints[i + 1], redBrush);
 	}
 
