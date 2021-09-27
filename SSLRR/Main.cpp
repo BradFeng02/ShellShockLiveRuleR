@@ -41,8 +41,8 @@ RECT SSrc; // game client size
 RECT RRrc; // ruler client size
 constexpr int rightPadding = 160;	// right strip wid
 constexpr int bottomPadding = 50;	// bottom strip hgt
-constexpr int strSize = 17;
-WCHAR dispStr[17];
+constexpr int strSize = 18;
+WCHAR dispStr[strSize];
 
 HWND SShwnd;	// game hwnd
 HWND RRhwnd;	// ruler hwnd
@@ -186,11 +186,11 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 	D2D1_ELLIPSE aimRadius = { tankOriginPT,aimCircle,aimCircle };
 	D2D1_ELLIPSE cursorAim = { curAimPT,7,7 };
 
-	int dispAngle;
+	short dispAngle;
 	if (a <= 0) dispAngle = a + 90;
-	else if (a > 0 && a <= 180) dispAngle = abs(90 - a);
-	else dispAngle = 270 - a;
-	swprintf(dispStr, strSize, L"P: %-3d     A: %-2d", p, dispAngle);
+	else if (a > 0 && a <= 180) dispAngle = 90 - a;
+	else dispAngle = a - 270;
+	swprintf(dispStr, strSize, L"P: %-3d     A: %-3d", p, dispAngle);
 
 	d2RenderTarget->BindDC(hdc, &RRrc);
 	d2RenderTarget->BeginDraw();
@@ -297,7 +297,20 @@ void autoAim() {
 	float transx = 65535 / (float)screenRC.right;
 	float transy = 65535 / (float)screenRC.bottom;
 	POINT toClick = { tankOrigin.x ,tankOrigin.y };
-
+	ClientToScreen(RRhwnd, &toClick);
+	float clickDist = aimCircle * 2.0f;
+	float slope = tan((a - 90) * DEG2RAD);
+	// check collision with screene edges when moving to angle
+	long edgex, edgey;
+	if (a <= 90) edgey = screenRC.top; // top
+	else  edgey = screenRC.bottom; // bot
+	if (a >= 0 && a < 180)  edgex = screenRC.right;  // right
+	else  edgex = screenRC.left; //left
+	
+	long dy = edgey - toClick.y;
+	long dx = edgex - toClick.x;
+	clickDist = min(clickDist, sqrtf(powf(dy / slope, 2) + powf(dy, 2)));
+	clickDist = min(clickDist, sqrtf(powf(dx * slope, 2) + powf(dx, 2)));
 
 	// begin inputs
 	SetForegroundWindow(SShwnd);
@@ -306,7 +319,6 @@ void autoAim() {
 
 	// move mouse to origin
 	mMove.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-	ClientToScreen(RRhwnd, &toClick);
 	mMove.mi.dx = (float)toClick.x * transx;
 	mMove.mi.dy = (float)toClick.y * transy;
 	SendInput(1, &mMove, sizeof(INPUT));
@@ -321,7 +333,6 @@ void autoAim() {
 
 	// move to angle
 	mMove.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-	float clickDist = aimCircle * 2.0f;
 	mMove.mi.dx += clickDist * cosf((a - 90) * DEG2RAD) * transx;
 	mMove.mi.dy += clickDist * sinf((a - 90) * DEG2RAD) * transy;
 	SendInput(1, &mMove, sizeof(INPUT));
