@@ -122,6 +122,9 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 		p = min(roundf(aimDist * 100.0f / aimCircle), 100.0f);
 		a = angle + 90;
 	}
+	else {
+		angle = a - 90;
+	}
 	
 	i = cosf(a * DEG2RAD);
 	j = sinf(a * DEG2RAD);
@@ -219,10 +222,10 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 	d2RenderTarget->DrawLine(xhair81, xhair82, yellowBrush);
 
 	// aim lines and point
+	d2RenderTarget->DrawLine(tankOriginPT, gameAimPT, pinkBrush);
 	if (aiming) {
-		d2RenderTarget->FillEllipse(cursorAim, purpleBrush);
 		d2RenderTarget->DrawLine(tankOriginPT, curAimPT, blueBrush, 1.0f, dashedStroke);
-		d2RenderTarget->DrawLine(tankOriginPT, gameAimPT, pinkBrush);
+		d2RenderTarget->FillEllipse(cursorAim, purpleBrush);
 	}
 
 	//D2D1_RECT_F testcur = D2D1::RectF(curAim.x - 10, curAim.y - 10, curAim.x + 10, curAim.y + 10);
