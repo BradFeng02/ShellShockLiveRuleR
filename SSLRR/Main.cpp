@@ -15,16 +15,14 @@ constexpr float RAD2DEG = 180.0F/PI;
 short a = 45;	// rounded value: angle (is -90 to 269 clockwise from left)
 unsigned short p = 50;	// rounded value: power
 short w = 0;	// wind
-short gameCurA = 0;		// current angle in game
-short gameCurP = 100;	// current power in game
 
 constexpr float r = 13.5;	// tank radius
 constexpr float aimCircle = 578 / 2.5; //aim circle radius // 578
-constexpr float g = -2.8783;	// gravity
+float g = -2.8783;	// gravity
 float i = 0;	// cos(a)
 float j = 1;	// sin(a)
 
-constexpr int maxTrajPoints = 69;
+constexpr int maxTrajPoints = 75;
 int usedTrajCnt = 0;
 D2D1_POINT_2F trajPoints[maxTrajPoints];
 int trajIndex = 0;
@@ -132,8 +130,8 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 	D2D1_POINT_2F *b, *c;
 	while (trajIndex < maxTrajPoints) {
 		// calc next pos
-		float ax = tankOrigin.x + j * r + j * p * t + w * t * t;
-		float ay = tankOrigin.y - i * r - i * p * t - g * t * t;
+		float ax = tankOrigin.x + j * r + j * (p + ((g > 0) ? 1 : 0)) * t + w * t * t; // 1 less power
+		float ay = tankOrigin.y - i * r - i * (p + ((g > 0) ? 1 : 0)) * t - g * t * t; // for underground
 
 		// simplify
 		if (trajIndex > 1) {
@@ -150,7 +148,7 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 		trajPoints[trajIndex].y = ay;
 
 		// enough drawn
-		if (ax < 0 || ax > ps.rcPaint.right || ay < -1000 || ay > 1000) {
+		if (ax < 0 || ax > ps.rcPaint.right || ay < -2000 || ay > 2000) {
 			usedTrajCnt = trajIndex;
 			break;
 		}
@@ -199,8 +197,8 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 	d2RenderTarget->FillRectangle(&bottomStrip, stripBrush);
 	d2RenderTarget->FillRectangle(&rightStrip, stripBrush);
 	d2RenderTarget->DrawText(dispStr, strSize, textFormat, bottomStrip, whiteBrush);
-	if(centering) d2RenderTarget->DrawText(L"` to center\n\narrows to adjust\n\n________\n\nTAB to toggle", 54, textFormat, rightStrip, whiteBrush);
-	else d2RenderTarget->DrawText(L"` to autoaim\n\narrows to aim\n\n________\n\nTAB to toggle", 52, textFormat, rightStrip, whiteBrush);
+	if(centering) d2RenderTarget->DrawText(L"\\| to center\n\n` to auto-find center\n\narrows to adjust\n\n________\n\TAB to toggle", 77, textFormat, rightStrip, whiteBrush);
+	else d2RenderTarget->DrawText(L"\\| to auto-aim\n\n` to invert gravity\n\narrows to aim\n\n________\n\TAB to toggle", 74, textFormat, rightStrip, whiteBrush);
 
 	for (int i = 0; i < usedTrajCnt; ++i) {
 		// D2D1_ELLIPSE debugDot = { trajPoints[i],1,1 };
@@ -236,14 +234,14 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 }
 
 //            a    d    w    s
-const int keyCnt = 58; //62
+const int keyCnt = 57; //62
 const int vks[keyCnt] = { VK_BACK, VK_RETURN, VK_LSHIFT, VK_RSHIFT, VK_LCONTROL, VK_RCONTROL, VK_ESCAPE,
 							VK_SPACE, VK_END, VK_HOME, /*VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN,*/ VK_DELETE,
 							0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, // 1-9
 							0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, // A-M
 							0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, // N-Z
 							VK_OEM_1, VK_OEM_PLUS, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD,
-							VK_OEM_2, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7 };
+							VK_OEM_2, VK_OEM_4, /*VK_OEM_5,*/ VK_OEM_6, VK_OEM_7};
 bool isDown[keyCnt] = { 0 };
 bool isSim[keyCnt] = { 0 };
 bool keyIsDown = false;
@@ -416,41 +414,35 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 		return 0;
 
 	case WM_KEYDOWN:
-		if (param == VK_TAB) centering = !centering;
+		if (param == VK_TAB) centering = !centering; // alt
 		else if (centering) {
 			if (param == VK_LEFT) tankOrigin.x -= 1;
 			else if (param == VK_RIGHT) tankOrigin.x += 1;
 			else if (param == VK_UP) tankOrigin.y -= 1;
 			else if (param == VK_DOWN) tankOrigin.y += 1;
-			else if (param == VK_OEM_3) { // ` key
+			else if (param == VK_OEM_5) { // \| key
 				GetCursorPos(&tankOrigin);
 				ScreenToClient(hwnd, &tankOrigin);
 			}
 		}
 		else {
 			if (param >= VK_LEFT && param <= VK_DOWN) {
-				switch (param) {
-				case VK_LEFT:
-					a -= 1;
-					break;
-				case VK_RIGHT:
-					a += 1;
-					break;
-				case VK_UP:
-					p += 1;
-					break;
-				case VK_DOWN:
-					p -= 1;
-					break;
-				}
+				if (param == VK_LEFT) a -= 1;
+				else if (param == VK_RIGHT) a += 1;
+				else if (param == VK_UP) p += 1;
+				else if (param == VK_DOWN) p -= 1;
+
 				if (a < -90) a = 269;
 				else if (a > 269) a = -90;
 				if (p > 100) 
 					p = 100;
 				else if (p < 0) p = 0;
 			}
-			if (param == VK_OEM_3) { // ` key // autoaim
+			else if (param == VK_OEM_5) { // \| key
 				autoAim();
+			}
+			else if (param == VK_OEM_3) { // `~ key
+				g = -g;
 			}
 		}
 		return 0;
