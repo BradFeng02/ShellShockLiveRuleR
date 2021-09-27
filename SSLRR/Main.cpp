@@ -200,8 +200,8 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 	d2RenderTarget->FillRectangle(&bottomStrip, stripBrush);
 	d2RenderTarget->FillRectangle(&rightStrip, stripBrush);
 	d2RenderTarget->DrawText(dispStr, strSize, textFormat, bottomStrip, whiteBrush);
-	if(centering) d2RenderTarget->DrawText(L"\\| to center\n\n` to auto-find center\n\narrows to adjust\n\n________\n\TAB to toggle", 77, textFormat, rightStrip, whiteBrush);
-	else d2RenderTarget->DrawText(L"\\| to auto-aim\n\n` to invert gravity\n\narrows to aim\n\n________\n\TAB to toggle", 74, textFormat, rightStrip, whiteBrush);
+	if(centering) d2RenderTarget->DrawText(L"` to center\n\n\n\\| to auto-find center\n\narrows to adjust\n\n________\n\TAB to toggle", 78, textFormat, rightStrip, whiteBrush);
+	else d2RenderTarget->DrawText(L"` to invert gravity\n\n\\| to auto-aim\n\n\narrows to aim\n\n________\n\TAB to toggle", 75, textFormat, rightStrip, whiteBrush);
 
 	for (int i = 0; i < usedTrajCnt; ++i) {
 		// D2D1_ELLIPSE debugDot = { trajPoints[i],1,1 };
@@ -358,6 +358,7 @@ void autoAim() {
 	SetForegroundWindow(RRhwnd);
 }
 
+bool tabToggle = true;
 LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 	switch (msg) {
 	case WM_CREATE:
@@ -417,13 +418,16 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 		return 0;
 
 	case WM_KEYDOWN:
-		if (param == VK_TAB) centering = !centering; // alt
+		if (param == VK_TAB && tabToggle) { // no repeats
+			centering = !centering;
+			tabToggle = false;
+		}
 		else if (centering) {
 			if (param == VK_LEFT) tankOrigin.x -= 1;
 			else if (param == VK_RIGHT) tankOrigin.x += 1;
 			else if (param == VK_UP) tankOrigin.y -= 1;
 			else if (param == VK_DOWN) tankOrigin.y += 1;
-			else if (param == VK_OEM_5) { // \| key
+			else if (param == VK_OEM_3) { // `~ key
 				GetCursorPos(&tankOrigin);
 				ScreenToClient(hwnd, &tankOrigin);
 			}
@@ -451,6 +455,7 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 		return 0;
 
 	case WM_KEYUP:
+		if (param == VK_TAB) tabToggle = true;
 		return 0;
 
 	default:
