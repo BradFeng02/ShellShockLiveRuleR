@@ -37,16 +37,20 @@ constexpr int SSwid = 1350;	// game wid
 constexpr int SShgt = 760;	// game hgt
 RECT SSrc; // game client size
 RECT RRrc; // ruler client size
-constexpr int rightPadding = 120;	// right strip wid
+constexpr int rightPadding = 160;	// right strip wid
 constexpr int bottomPadding = 50;	// bottom strip hgt
+constexpr int strSize = 17;
+WCHAR dispStr[17];
 
 HWND SShwnd;	// game hwnd
 HWND RRhwnd;	// ruler hwnd
 HDC SSdc;		// game device context
 
 ID2D1DCRenderTarget* d2RenderTarget;
+IDWriteTextFormat* textFormat;
 ID2D1StrokeStyle* dashedStroke;
 ID2D1SolidColorBrush* stripBrush;
+ID2D1SolidColorBrush* whiteBrush;
 ID2D1SolidColorBrush* redBrush;
 ID2D1SolidColorBrush* greenBrush;
 ID2D1SolidColorBrush* yellowBrush;
@@ -56,7 +60,8 @@ ID2D1SolidColorBrush* pinkBrush;
 
 bool offStandby = true;
 LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam);
-INPUT ip;
+INPUT ip; // simulate keyboard input
+INPUT mMove; // sim mouse input
 void simKey(int vk, bool press);
 void setupD2D();
 
@@ -66,6 +71,12 @@ int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR c
 	ip.ki.wScan = 0;
 	ip.ki.time = 0;
 	ip.ki.dwExtraInfo = 0;
+
+	mMove.type = INPUT_MOUSE;
+	mMove.mi.mouseData = 0;
+	mMove.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+	mMove.mi.time = 0;
+	mMove.mi.dwExtraInfo = 0;
 
 	SShwnd = FindWindow(nullptr, L"ShellShock Live");
 	if (!SShwnd) {
@@ -105,8 +116,10 @@ int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR c
 }
 
 void render(HDC &hdc, PAINTSTRUCT &ps) {
-	float angle = round(atan2f(curAim.y - tankOrigin.y, curAim.x - tankOrigin.x)*RAD2DEG);
+	float aimDist = sqrtf(pow(curAim.y - tankOrigin.y, 2) + pow(curAim.x - tankOrigin.x, 2));
+	p = min(roundf((aimDist-4.0f*aimDist/aimCircle)*100.0f/(aimCircle+0.0f)),100.0f);
 
+	float angle = floor(atan2f(curAim.y - tankOrigin.y, curAim.x - tankOrigin.x) * RAD2DEG);
 	a = angle + 90;
 	i = cosf(a * DEG2RAD);
 	j = sinf(a * DEG2RAD);
@@ -163,11 +176,17 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 	D2D1_POINT_2F xhair72 = { tankOrigin.x + 163.5 - 20,tankOrigin.y + 163.5 - 20 };
 	D2D1_POINT_2F xhair81 = { tankOrigin.x - 163.5 + 10,tankOrigin.y + 163.5 - 10 }; // bot left diag xhair
 	D2D1_POINT_2F xhair82 = { tankOrigin.x - 163.5 + 20,tankOrigin.y + 163.5 - 20 };
-	D2D1_RECT_F bottomStrip = D2D1::RectF(0, ps.rcPaint.bottom - bottomPadding, ps.rcPaint.right, ps.rcPaint.bottom);
-	D2D1_RECT_F rightStrip = D2D1::RectF(ps.rcPaint.right - rightPadding, 0, ps.rcPaint.right, ps.rcPaint.bottom - bottomPadding);
+	D2D1_RECT_F bottomStrip = D2D1::RectF(0, ps.rcPaint.bottom - bottomPadding, ps.rcPaint.right-rightPadding, ps.rcPaint.bottom);
+	D2D1_RECT_F rightStrip = D2D1::RectF(ps.rcPaint.right - rightPadding, 0, ps.rcPaint.right, ps.rcPaint.bottom);
 	D2D1_ELLIPSE tankRadius = { tankOriginPT,r,r };
 	D2D1_ELLIPSE aimRadius = { tankOriginPT,aimCircle,aimCircle };
 	D2D1_ELLIPSE cursorAim = { curAimPT,3,3 };
+
+	int dispAngle;
+	if (a <= 0) dispAngle = a + 90;
+	else if (a > 0 && a <= 180) dispAngle = abs(90 - a);
+	else dispAngle = 270 - a;
+	swprintf(dispStr, strSize, L"P: %-3d     A: %-2d", p, dispAngle);
 
 	d2RenderTarget->BindDC(hdc, &RRrc);
 	d2RenderTarget->BeginDraw();
@@ -175,6 +194,9 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 	// bottom and right strips
 	d2RenderTarget->FillRectangle(&bottomStrip, stripBrush);
 	d2RenderTarget->FillRectangle(&rightStrip, stripBrush);
+	d2RenderTarget->DrawText(dispStr, strSize, textFormat, bottomStrip, whiteBrush);
+	if(centering) d2RenderTarget->DrawText(L"` to center\n\narrows to adjust\n\n________\n\nTAB to toggle", 54, textFormat, rightStrip, whiteBrush);
+	else d2RenderTarget->DrawText(L"` to autoaim\n\narrows to aim\n\n________\n\nTAB to toggle", 52, textFormat, rightStrip, whiteBrush);
 
 	for (int i = 0; i < usedTrajCnt; ++i) {
 		// D2D1_ELLIPSE debugDot = { trajPoints[i],1,1 };
@@ -310,7 +332,10 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 
 	case WM_LBUTTONDOWN:
 		SendMessage(SShwnd, WM_LBUTTONDOWN, param, lparam);
-		aiming = true;
+		int x, y;
+		y = lparam >> 16;
+		x = lparam & 0x0000FFFF;
+		if (pow(y - tankOrigin.y, 2) + pow(x - tankOrigin.x, 2) <= aimCircle * aimCircle) aiming = true;
 		return 0;
 
 	case WM_LBUTTONUP:
@@ -319,20 +344,43 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 		return 0;
 
 	case WM_KEYDOWN:
-		if (param == VK_TAB) { 
-			GetCursorPos(&tankOrigin);
-			ScreenToClient(hwnd, &tankOrigin);
-			centering = true; }
+		if (param == VK_TAB) centering = !centering;
 		else if (centering) {
 			if (param == VK_LEFT) tankOrigin.x -= 1;
 			if (param == VK_RIGHT) tankOrigin.x += 1;
 			if (param == VK_UP) tankOrigin.y -= 1;
 			if (param == VK_DOWN) tankOrigin.y += 1;
+			if (param == VK_OEM_3) { // ` key
+				GetCursorPos(&tankOrigin);
+				ScreenToClient(hwnd, &tankOrigin);
+			}
+		}
+		else {
+			if (param == VK_OEM_3) { // ` key
+			//POINT toClick = { tankOrigin.x + aimCircle/2.0f * cosf((a - 90) * DEG2RAD),tankOrigin.y + aimCircle/2.0f * sinf((a - 90) * DEG2RAD) };
+				float clickDist = aimCircle / 1.1f;
+
+				RECT screenRC;
+				GetWindowRect(GetDesktopWindow(), &screenRC);
+				float transx = 65535 / (float)screenRC.right;
+				float transy = 65535 / (float)screenRC.bottom;
+
+				POINT toClick = { tankOrigin.x ,tankOrigin.y };
+				ClientToScreen(RRhwnd, &toClick);
+				mMove.mi.dx = (float)toClick.x * transx;
+				mMove.mi.dy = (float)toClick.y * transy;
+
+				if (a >= -45 && a < 45) mMove.mi.dy -= clickDist * transy;
+				else if (a >= 45 && a < 135) mMove.mi.dx += clickDist * transx;
+				else if (a >= 135 && a < 225) mMove.mi.dy += clickDist * transy;
+				else mMove.mi.dx -= clickDist * transx;
+
+				SendInput(1, &mMove, sizeof(INPUT));
+			}
 		}
 		return 0;
 
 	case WM_KEYUP:
-		if (param == VK_TAB) centering = false;
 		return 0;
 
 	default:
@@ -353,11 +401,17 @@ void simKey(int vk, bool press) {
 	}
 }
 
-
-float dashes[2] = { r,r };
 void setupD2D() {
 	ID2D1Factory* d2Factory;
 	D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &d2Factory);
+
+	IDWriteFactory *d2WriteFactory;
+	DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(d2WriteFactory), reinterpret_cast<IUnknown**>(&d2WriteFactory));
+	d2WriteFactory->CreateTextFormat(L"Consolas", nullptr,
+		DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+		30,L"",&textFormat);
+	textFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+	textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
 	auto props = D2D1::RenderTargetProperties();
 	props.pixelFormat = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
@@ -366,11 +420,15 @@ void setupD2D() {
 
 	d2Factory->CreateStrokeStyle(D2D1::StrokeStyleProperties(
 		D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_FLAT,
-		D2D1_LINE_JOIN_MITER,10.0F, D2D1_DASH_STYLE_CUSTOM,0.0f), dashes, 2, &dashedStroke);
+		D2D1_LINE_JOIN_MITER,10.0F, D2D1_DASH_STYLE_CUSTOM,0.0f), &r, 1, &dashedStroke);
 
 	d2RenderTarget->CreateSolidColorBrush(
-		D2D1::ColorF(D2D1::ColorF::DarkGray),
+		D2D1::ColorF(D2D1::ColorF::DimGray),
 		&stripBrush
+	);
+	d2RenderTarget->CreateSolidColorBrush(
+		D2D1::ColorF(D2D1::ColorF::White),
+		&whiteBrush
 	);
 	d2RenderTarget->CreateSolidColorBrush(
 		D2D1::ColorF(D2D1::ColorF::IndianRed),
@@ -399,4 +457,5 @@ void setupD2D() {
 	);
 
 	d2Factory->Release();
+	d2WriteFactory->Release();
 }
