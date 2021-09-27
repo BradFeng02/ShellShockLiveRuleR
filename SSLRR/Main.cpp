@@ -12,9 +12,11 @@ constexpr float PI = 3.141592654f;
 constexpr float DEG2RAD = PI/180.0F;
 constexpr float RAD2DEG = 180.0F/PI;
 
-int a = 45;	// in game value: angle
-unsigned short p = 100;	// in game value: power
-short w = 0;	// in game value: wind
+short a = 45;	// rounded value: angle (is -90 to 269 clockwise from left)
+unsigned short p = 50;	// rounded value: power
+short w = 0;	// wind
+short gameCurA = 0;		// current angle in game
+short gameCurP = 100;	// current power in game
 
 constexpr float r = 13.5;	// tank radius
 constexpr float aimCircle = 578 / 2.5; //aim circle radius // 578
@@ -74,7 +76,6 @@ int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR c
 
 	mMove.type = INPUT_MOUSE;
 	mMove.mi.mouseData = 0;
-	mMove.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
 	mMove.mi.time = 0;
 	mMove.mi.dwExtraInfo = 0;
 
@@ -117,10 +118,13 @@ int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR c
 
 void render(HDC &hdc, PAINTSTRUCT &ps) {
 	float aimDist = sqrtf(pow(curAim.y - tankOrigin.y, 2) + pow(curAim.x - tankOrigin.x, 2));
-	p = min(roundf((aimDist-4.0f*aimDist/aimCircle)*100.0f/(aimCircle+0.0f)),100.0f);
+	float angle = roundf(atan2f(curAim.y - tankOrigin.y, curAim.x - tankOrigin.x) * RAD2DEG);
 
-	float angle = floor(atan2f(curAim.y - tankOrigin.y, curAim.x - tankOrigin.x) * RAD2DEG);
-	a = angle + 90;
+	if (aiming) {	
+		p = min(roundf(aimDist * 100.0f / aimCircle), 100.0f);
+		a = angle + 90;
+	}
+	
 	i = cosf(a * DEG2RAD);
 	j = sinf(a * DEG2RAD);
 	float t = 0;
@@ -146,7 +150,7 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 		trajPoints[trajIndex].y = ay;
 
 		// enough drawn
-		if (ax<0 || ax>ps.rcPaint.right || ay < -1000 || ay>1000) {
+		if (ax < 0 || ax > ps.rcPaint.right || ay < -1000 || ay > 1000) {
 			usedTrajCnt = trajIndex;
 			break;
 		}
@@ -180,7 +184,7 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 	D2D1_RECT_F rightStrip = D2D1::RectF(ps.rcPaint.right - rightPadding, 0, ps.rcPaint.right, ps.rcPaint.bottom);
 	D2D1_ELLIPSE tankRadius = { tankOriginPT,r,r };
 	D2D1_ELLIPSE aimRadius = { tankOriginPT,aimCircle,aimCircle };
-	D2D1_ELLIPSE cursorAim = { curAimPT,3,3 };
+	D2D1_ELLIPSE cursorAim = { curAimPT,7,7 };
 
 	int dispAngle;
 	if (a <= 0) dispAngle = a + 90;
@@ -216,11 +220,12 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 	d2RenderTarget->DrawLine(xhair71, xhair72, yellowBrush);
 	d2RenderTarget->DrawLine(xhair81, xhair82, yellowBrush);
 
-	// aim line and point and arc
-	d2RenderTarget->FillEllipse(cursorAim, purpleBrush);
-	d2RenderTarget->DrawLine(tankOriginPT, curAimPT, blueBrush,1.0f,dashedStroke);
-	d2RenderTarget->DrawLine(tankOriginPT, gameAimPT, pinkBrush);
-	//d2RenderTarget->DrawGeometry()
+	// aim lines and point
+	if (aiming) {
+		d2RenderTarget->FillEllipse(cursorAim, purpleBrush);
+		d2RenderTarget->DrawLine(tankOriginPT, curAimPT, blueBrush, 1.0f, dashedStroke);
+		d2RenderTarget->DrawLine(tankOriginPT, gameAimPT, pinkBrush);
+	}
 
 	//D2D1_RECT_F testcur = D2D1::RectF(curAim.x - 10, curAim.y - 10, curAim.x + 10, curAim.y + 10);
 	//D2D1_RECT_F testcur2 = D2D1::RectF(curPos.x - 10, curPos.y - 10, curPos.x + 10, curPos.y + 10);
@@ -231,9 +236,9 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 }
 
 //            a    d    w    s
-const int keyCnt = 62;
+const int keyCnt = 58; //62
 const int vks[keyCnt] = { VK_BACK, VK_RETURN, VK_LSHIFT, VK_RSHIFT, VK_LCONTROL, VK_RCONTROL, VK_ESCAPE,
-							VK_SPACE, VK_END, VK_HOME, VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN, VK_DELETE,
+							VK_SPACE, VK_END, VK_HOME, /*VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN,*/ VK_DELETE,
 							0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, // 1-9
 							0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, // A-M
 							0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, // N-Z
@@ -286,6 +291,61 @@ bool processKeys() {
 	}
 }
 
+void autoAim() {
+	RECT screenRC;
+	GetWindowRect(GetDesktopWindow(), &screenRC);
+	float transx = 65535 / (float)screenRC.right;
+	float transy = 65535 / (float)screenRC.bottom;
+	POINT toClick = { tankOrigin.x ,tankOrigin.y };
+
+
+	// begin inputs
+	SetForegroundWindow(SShwnd);
+
+	this_thread::sleep_for(chrono::milliseconds(25));
+
+	// move mouse to origin
+	mMove.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+	ClientToScreen(RRhwnd, &toClick);
+	mMove.mi.dx = (float)toClick.x * transx;
+	mMove.mi.dy = (float)toClick.y * transy;
+	SendInput(1, &mMove, sizeof(INPUT));
+
+	this_thread::sleep_for(chrono::milliseconds(50));
+
+	// click origin
+	mMove.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+	SendInput(1, &mMove, sizeof(INPUT));
+
+	this_thread::sleep_for(chrono::milliseconds(50));
+
+	// move to angle
+	mMove.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+	float clickDist = aimCircle * 2.0f;
+	mMove.mi.dx += clickDist * cosf((a - 90) * DEG2RAD) * transx;
+	mMove.mi.dy += clickDist * sinf((a - 90) * DEG2RAD) * transy;
+	SendInput(1, &mMove, sizeof(INPUT));
+
+	this_thread::sleep_for(chrono::milliseconds(50));
+
+	// click up
+	mMove.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+	SendInput(1, &mMove, sizeof(INPUT));
+
+	// adjust power
+	for (unsigned short i = 100; i > p; --i) {
+		this_thread::sleep_for(chrono::milliseconds(50));
+		simKey(VK_DOWN, true);
+		this_thread::sleep_for(chrono::milliseconds(5));
+		simKey(VK_DOWN, false);
+	}
+
+	this_thread::sleep_for(chrono::milliseconds(25));
+
+	//switch back
+	SetForegroundWindow(RRhwnd);
+}
+
 LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 	switch (msg) {
 	case WM_CREATE:
@@ -331,6 +391,7 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 		return 0;
 
 	case WM_LBUTTONDOWN:
+		centering = false;
 		SendMessage(SShwnd, WM_LBUTTONDOWN, param, lparam);
 		int x, y;
 		y = lparam >> 16;
@@ -347,35 +408,38 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 		if (param == VK_TAB) centering = !centering;
 		else if (centering) {
 			if (param == VK_LEFT) tankOrigin.x -= 1;
-			if (param == VK_RIGHT) tankOrigin.x += 1;
-			if (param == VK_UP) tankOrigin.y -= 1;
-			if (param == VK_DOWN) tankOrigin.y += 1;
-			if (param == VK_OEM_3) { // ` key
+			else if (param == VK_RIGHT) tankOrigin.x += 1;
+			else if (param == VK_UP) tankOrigin.y -= 1;
+			else if (param == VK_DOWN) tankOrigin.y += 1;
+			else if (param == VK_OEM_3) { // ` key
 				GetCursorPos(&tankOrigin);
 				ScreenToClient(hwnd, &tankOrigin);
 			}
 		}
 		else {
-			if (param == VK_OEM_3) { // ` key
-			//POINT toClick = { tankOrigin.x + aimCircle/2.0f * cosf((a - 90) * DEG2RAD),tankOrigin.y + aimCircle/2.0f * sinf((a - 90) * DEG2RAD) };
-				float clickDist = aimCircle / 1.1f;
-
-				RECT screenRC;
-				GetWindowRect(GetDesktopWindow(), &screenRC);
-				float transx = 65535 / (float)screenRC.right;
-				float transy = 65535 / (float)screenRC.bottom;
-
-				POINT toClick = { tankOrigin.x ,tankOrigin.y };
-				ClientToScreen(RRhwnd, &toClick);
-				mMove.mi.dx = (float)toClick.x * transx;
-				mMove.mi.dy = (float)toClick.y * transy;
-
-				if (a >= -45 && a < 45) mMove.mi.dy -= clickDist * transy;
-				else if (a >= 45 && a < 135) mMove.mi.dx += clickDist * transx;
-				else if (a >= 135 && a < 225) mMove.mi.dy += clickDist * transy;
-				else mMove.mi.dx -= clickDist * transx;
-
-				SendInput(1, &mMove, sizeof(INPUT));
+			if (param >= VK_LEFT && param <= VK_DOWN) {
+				switch (param) {
+				case VK_LEFT:
+					a -= 1;
+					break;
+				case VK_RIGHT:
+					a += 1;
+					break;
+				case VK_UP:
+					p += 1;
+					break;
+				case VK_DOWN:
+					p -= 1;
+					break;
+				}
+				if (a < -90) a = 269;
+				else if (a > 269) a = -90;
+				if (p > 100) 
+					p = 100;
+				else if (p < 0) p = 0;
+			}
+			if (param == VK_OEM_3) { // ` key // autoaim
+				autoAim();
 			}
 		}
 		return 0;
