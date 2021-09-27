@@ -13,16 +13,17 @@ constexpr float DEG2RAD = PI/180.0F;
 constexpr float RAD2DEG = 180.0F/PI;
 
 int a = 45;	// in game value: angle
-unsigned short p = 30;	// in game value: power
+unsigned short p = 100;	// in game value: power
 short w = 0;	// in game value: wind
 
-constexpr float r = 15;	// tank radius
-constexpr float aimCircle = 578 / 2.5; //aim circle radius
-constexpr float g = -1;	// gravity
+constexpr float r = 13.5;	// tank radius
+constexpr float aimCircle = 578 / 2.5; //aim circle radius // 578
+constexpr float g = -2.8783;	// gravity
 float i = 0;	// cos(a)
 float j = 1;	// sin(a)
 
-constexpr int maxTrajPoints = 100;
+constexpr int maxTrajPoints = 69;
+int usedTrajCnt = 0;
 D2D1_POINT_2F trajPoints[maxTrajPoints];
 int trajIndex = 0;
 
@@ -104,24 +105,64 @@ int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR c
 }
 
 void render(HDC &hdc, PAINTSTRUCT &ps) {
-	float angle = round(atan2(curAim.y - tankOrigin.y, curAim.x - tankOrigin.x)*RAD2DEG);
+	float angle = round(atan2f(curAim.y - tankOrigin.y, curAim.x - tankOrigin.x)*RAD2DEG);
 
 	a = angle + 90;
-	i = cos(a * DEG2RAD);
-	j = sin(a * DEG2RAD);
-	int t = 0;
+	i = cosf(a * DEG2RAD);
+	j = sinf(a * DEG2RAD);
+	float t = 0;
 	trajIndex = 0;
+	D2D1_POINT_2F *b, *c;
 	while (trajIndex < maxTrajPoints) {
-		trajPoints[trajIndex].x = tankOrigin.x + j * r + j * p * t + w * t * t;
-		trajPoints[trajIndex].y = tankOrigin.y - i * r - i * p * t - g * t * t;
-		t += 1;
+		// calc next pos
+		float ax = tankOrigin.x + j * r + j * p * t + w * t * t;
+		float ay = tankOrigin.y - i * r - i * p * t - g * t * t;
+
+		// simplify
+		if (trajIndex > 1) {
+			b = &(trajPoints[trajIndex - 1]);
+			c = &(trajPoints[trajIndex - 2]);
+			float ang1 = atan2f(ay - b->y, ax - b->x);
+			float ang2 = atan2f(b->y - c->y, b->x - c->x);
+			if (abs(ang1 - ang2) < .01f) { // combine if less than .01 rad diff.
+				trajIndex -= 1;
+			}
+		}
+
+		trajPoints[trajIndex].x = ax;
+		trajPoints[trajIndex].y = ay;
+
+		// enough drawn
+		if (ax<0 || ax>ps.rcPaint.right) {
+			usedTrajCnt = trajIndex;
+			break;
+		}
+
+		t += 0.5;
 		trajIndex += 1;
 	}
 
 	// GDI POINT to d2 point
 	D2D1_POINT_2F curAimPT = { curAim.x,curAim.y };
 	D2D1_POINT_2F tankOriginPT = { tankOrigin.x,tankOrigin.y };
-	D2D1_POINT_2F gameAimPT = { tankOrigin.x + aimCircle * cos(angle * DEG2RAD) ,tankOrigin.y + aimCircle * sin(angle * DEG2RAD) };
+	D2D1_POINT_2F gameAimPT = { tankOrigin.x + aimCircle * cosf(angle * DEG2RAD) ,tankOrigin.y + aimCircle * sinf(angle * DEG2RAD) };
+	// crosshair to help alignment
+	D2D1_POINT_2F xhair11 = { tankOrigin.x,tankOrigin.y - aimCircle + 15 }; // top vertical xhair
+	D2D1_POINT_2F xhair12 = { tankOrigin.x,tankOrigin.y - aimCircle + 30 };
+	D2D1_POINT_2F xhair21 = { tankOrigin.x + aimCircle - 15,tankOrigin.y }; // right horiz xhair
+	D2D1_POINT_2F xhair22 = { tankOrigin.x + aimCircle - 30,tankOrigin.y };
+	D2D1_POINT_2F xhair31 = { tankOrigin.x,tankOrigin.y + aimCircle - 15 }; // bot vertical xhair
+	D2D1_POINT_2F xhair32 = { tankOrigin.x,tankOrigin.y + aimCircle - 30 };
+	D2D1_POINT_2F xhair41 = { tankOrigin.x - aimCircle + 15,tankOrigin.y }; // left horiz xhair
+	D2D1_POINT_2F xhair42 = { tankOrigin.x - aimCircle + 30,tankOrigin.y };
+	D2D1_POINT_2F xhair51 = { tankOrigin.x - 163.5 + 10,tankOrigin.y - 163.5 + 10 }; // top left diag xhair
+	D2D1_POINT_2F xhair52 = { tankOrigin.x - 163.5 + 20,tankOrigin.y - 163.5 + 20 };
+	D2D1_POINT_2F xhair61 = { tankOrigin.x + 163.5 - 10,tankOrigin.y - 163.5 + 10 }; // top right diag xhair
+	D2D1_POINT_2F xhair62 = { tankOrigin.x + 163.5 - 20,tankOrigin.y - 163.5 + 20 };
+	D2D1_POINT_2F xhair71 = { tankOrigin.x + 163.5 - 10,tankOrigin.y + 163.5 - 10 }; // bot right diag xhair
+	D2D1_POINT_2F xhair72 = { tankOrigin.x + 163.5 - 20,tankOrigin.y + 163.5 - 20 };
+	D2D1_POINT_2F xhair81 = { tankOrigin.x - 163.5 + 10,tankOrigin.y + 163.5 - 10 }; // bot left diag xhair
+	D2D1_POINT_2F xhair82 = { tankOrigin.x - 163.5 + 20,tankOrigin.y + 163.5 - 20 };
 	D2D1_RECT_F bottomStrip = D2D1::RectF(0, ps.rcPaint.bottom - bottomPadding, ps.rcPaint.right, ps.rcPaint.bottom);
 	D2D1_RECT_F rightStrip = D2D1::RectF(ps.rcPaint.right - rightPadding, 0, ps.rcPaint.right, ps.rcPaint.bottom - bottomPadding);
 	D2D1_ELLIPSE tankRadius = { tankOriginPT,r,r };
@@ -135,13 +176,23 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 	d2RenderTarget->FillRectangle(&bottomStrip, stripBrush);
 	d2RenderTarget->FillRectangle(&rightStrip, stripBrush);
 
-	for (int i = 0; i < maxTrajPoints-1; ++i) {
+	for (int i = 0; i < usedTrajCnt; ++i) {
+		D2D1_ELLIPSE debugDot = { trajPoints[i],1,1 };
+		d2RenderTarget->DrawEllipse(debugDot, stripBrush);
 		d2RenderTarget->DrawLine(trajPoints[i], trajPoints[i + 1], redBrush);
 	}
 
-	// tank barrel radius, aim radius
+	// tank barrel radius, aim radius, crosshair
 	d2RenderTarget->DrawEllipse(tankRadius, greenBrush);
 	d2RenderTarget->DrawEllipse(aimRadius, yellowBrush);
+	d2RenderTarget->DrawLine(xhair11, xhair12, yellowBrush);
+	d2RenderTarget->DrawLine(xhair21, xhair22, yellowBrush);
+	d2RenderTarget->DrawLine(xhair31, xhair32, yellowBrush);
+	d2RenderTarget->DrawLine(xhair41, xhair42, yellowBrush);
+	d2RenderTarget->DrawLine(xhair51, xhair52, yellowBrush);
+	d2RenderTarget->DrawLine(xhair61, xhair62, yellowBrush);
+	d2RenderTarget->DrawLine(xhair71, xhair72, yellowBrush);
+	d2RenderTarget->DrawLine(xhair81, xhair82, yellowBrush);
 
 	// aim line and point and arc
 	d2RenderTarget->FillEllipse(cursorAim, purpleBrush);
@@ -225,10 +276,8 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 		return 0;
 
 	case WM_TIMER:
-		if (!processKeys()) { // if ruler window shown
+		if (centering || !processKeys()) { // if ruler window shown
 			if (centering) {
-				GetCursorPos(&tankOrigin);
-				ScreenToClient(hwnd, &tankOrigin);
 				offStandby = true; // high update rate while centering
 			}
 
@@ -270,7 +319,16 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 		return 0;
 
 	case WM_KEYDOWN:
-		if (param == VK_TAB) centering = true;
+		if (param == VK_TAB) { 
+			GetCursorPos(&tankOrigin);
+			ScreenToClient(hwnd, &tankOrigin);
+			centering = true; }
+		else if (centering) {
+			if (param == VK_LEFT) tankOrigin.x -= 1;
+			if (param == VK_RIGHT) tankOrigin.x += 1;
+			if (param == VK_UP) tankOrigin.y -= 1;
+			if (param == VK_DOWN) tankOrigin.y += 1;
+		}
 		return 0;
 
 	case WM_KEYUP:
