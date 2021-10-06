@@ -45,6 +45,10 @@ WCHAR dispStr[strSize];
 HWND SShwnd;	// game hwnd
 HWND RRhwnd;	// ruler hwnd
 HDC SSdc;		// game device context
+HDC CPdc;			// clone of SSdc
+HBITMAP CPbmp;		// bitmap of game
+void* CPbmpPixels;	// pointer to pixels
+cv::Mat CPmat;		// mat of game
 
 ID2D1DCRenderTarget* d2RenderTarget;
 IDWriteTextFormat* textFormat;
@@ -66,7 +70,6 @@ void simKey(int vk, bool press);
 void setupD2D();
 
 int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR cmdLine, INT cmdCount) {
-
 	ip.type = INPUT_KEYBOARD;
 	ip.ki.wScan = 0;
 	ip.ki.time = 0;
@@ -88,6 +91,19 @@ int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR c
 
 	SSdc = GetDC(SShwnd);
 	GetClientRect(SShwnd, &SSrc);
+	CPdc = CreateCompatibleDC(SSdc);
+
+	// for ssdc to opencv mat
+	BITMAPINFO bi;
+	ZeroMemory(&bi, sizeof(BITMAPINFO));
+	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bi.bmiHeader.biWidth = SSrc.right - SSrc.left;
+	bi.bmiHeader.biHeight = -(SSrc.bottom - SSrc.top);  //neg indicating a top-down DIB, so (0,0) is at top left
+	bi.bmiHeader.biPlanes = 1;
+	bi.bmiHeader.biBitCount = 32;
+	CPbmp = CreateDIBSection(SSdc, &bi, DIB_RGB_COLORS, &CPbmpPixels, NULL, 0);
+	SelectObject(CPdc, CPbmp);
+	CPmat = Mat(SSrc.bottom - SSrc.top, SSrc.right - SSrc.left, CV_8UC4, CPbmpPixels, 0);
 
 	WNDCLASS wc{};
 	wc.hInstance = currentInstance;
@@ -415,6 +431,14 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 	case WM_LBUTTONUP:
 		SendMessage(SShwnd, WM_LBUTTONUP, param, lparam);
 		aiming = false;
+		return 0;
+
+	case WM_RBUTTONDOWN:
+		return 0;
+
+	case WM_RBUTTONUP:
+		BitBlt(CPdc, 0, 0, SSrc.right - SSrc.left, SSrc.bottom - SSrc.top, SSdc, 0, 0, SRCCOPY);
+		cv::imshow("CPmat",CPmat);
 		return 0;
 
 	case WM_KEYDOWN:
