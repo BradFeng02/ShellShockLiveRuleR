@@ -18,6 +18,7 @@ short w = 0;	// wind
 
 constexpr float r = 13.5;	// tank radius
 constexpr float aimCircle = 578 / 2.5; //aim circle radius // 578
+constexpr int detectRad = 116; // aim radius for hough circles
 float g = -2.8783;	// gravity
 float i = 0;	// cos(a)
 float j = 1;	// sin(a)
@@ -32,6 +33,8 @@ POINT curAim;	// cursor for aiming
 bool aiming = false;	// if click+drag aiming
 POINT tankOrigin = { 100,100 };	// center of tank
 bool positioning = false;	// if positioning on tank
+bool LbtnDown = false;		// if left mouse button down
+bool RbtnDown = false;		// if right mouse button down
 bool centering = false; // if holding right click, accumulating on mat
 
 constexpr int SSwid = 1350;	// game wid
@@ -43,6 +46,10 @@ constexpr int rightPadding = 160;	// right strip wid
 constexpr int bottomPadding = 50;	// bottom strip hgt
 constexpr int strSize = 18;
 WCHAR dispStr[strSize];
+auto positioningToolTip = L"CENTERING\n[TAB]\n\n--------\n` to center\n\n--------\narrows to shift\n========\n\nLMB to aim\n--------\n\\| to auto-aim\n--------\nRMB to auto-center";
+constexpr int pttLen = 136;
+auto aimingToolTip = L"AIMING\n[TAB]\n\n--------\n` to invert gravity\n--------\narrows to adjust\n========\n\nLMB to aim\n--------\n\\| to auto-aim\n--------\nRMB to auto-center";
+constexpr int attLen = 141;
 
 HWND SShwnd;	// game hwnd
 HWND RRhwnd;	// ruler hwnd
@@ -53,6 +60,7 @@ void* CPbmpPixels;	// pointer to pixels
 Mat CPmat;		// mat of game // don't modify
 Rect2i CProi;	// roi of aiming circle
 Mat RRmat;		// mat of game to process
+vector<Vec3f> circles;	// circles from hough circles
 
 ID2D1DCRenderTarget* d2RenderTarget;
 IDWriteTextFormat* textFormat;
@@ -66,6 +74,7 @@ ID2D1SolidColorBrush* purpleBrush;
 ID2D1SolidColorBrush* blueBrush;
 ID2D1SolidColorBrush* pinkBrush;
 
+int tryAutocenter = 0;
 bool offStandby = true;
 LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam);
 INPUT ip; // simulate keyboard input
@@ -186,21 +195,21 @@ void render(HDC& hdc, PAINTSTRUCT& ps) {
 	D2D1_POINT_2F gameAimPT = { tankOrigin.x + aimCircle * cosf(angle * DEG2RAD) ,tankOrigin.y + aimCircle * sinf(angle * DEG2RAD) };
 	// crosshair to help alignment
 	D2D1_POINT_2F xhair11 = { tankOrigin.x,tankOrigin.y - aimCircle + 15 }; // top vertical xhair
-	D2D1_POINT_2F xhair12 = { tankOrigin.x,tankOrigin.y - aimCircle + 30 };
+	D2D1_POINT_2F xhair12 = { tankOrigin.x,tankOrigin.y - aimCircle + 200 };
 	D2D1_POINT_2F xhair21 = { tankOrigin.x + aimCircle - 15,tankOrigin.y }; // right horiz xhair
-	D2D1_POINT_2F xhair22 = { tankOrigin.x + aimCircle - 30,tankOrigin.y };
+	D2D1_POINT_2F xhair22 = { tankOrigin.x + aimCircle - 200,tankOrigin.y };
 	D2D1_POINT_2F xhair31 = { tankOrigin.x,tankOrigin.y + aimCircle - 15 }; // bot vertical xhair
-	D2D1_POINT_2F xhair32 = { tankOrigin.x,tankOrigin.y + aimCircle - 30 };
+	D2D1_POINT_2F xhair32 = { tankOrigin.x,tankOrigin.y + aimCircle - 200 };
 	D2D1_POINT_2F xhair41 = { tankOrigin.x - aimCircle + 15,tankOrigin.y }; // left horiz xhair
-	D2D1_POINT_2F xhair42 = { tankOrigin.x - aimCircle + 30,tankOrigin.y };
-	D2D1_POINT_2F xhair51 = { tankOrigin.x - 163.5 + 10,tankOrigin.y - 163.5 + 10 }; // top left diag xhair
-	D2D1_POINT_2F xhair52 = { tankOrigin.x - 163.5 + 20,tankOrigin.y - 163.5 + 20 };
-	D2D1_POINT_2F xhair61 = { tankOrigin.x + 163.5 - 10,tankOrigin.y - 163.5 + 10 }; // top right diag xhair
-	D2D1_POINT_2F xhair62 = { tankOrigin.x + 163.5 - 20,tankOrigin.y - 163.5 + 20 };
-	D2D1_POINT_2F xhair71 = { tankOrigin.x + 163.5 - 10,tankOrigin.y + 163.5 - 10 }; // bot right diag xhair
-	D2D1_POINT_2F xhair72 = { tankOrigin.x + 163.5 - 20,tankOrigin.y + 163.5 - 20 };
-	D2D1_POINT_2F xhair81 = { tankOrigin.x - 163.5 + 10,tankOrigin.y + 163.5 - 10 }; // bot left diag xhair
-	D2D1_POINT_2F xhair82 = { tankOrigin.x - 163.5 + 20,tankOrigin.y + 163.5 - 20 };
+	D2D1_POINT_2F xhair42 = { tankOrigin.x - aimCircle + 200,tankOrigin.y };
+	D2D1_POINT_2F xhair51 = { tankOrigin.x - 163.5 + 15,tankOrigin.y - 163.5 + 15 }; // top left diag xhair
+	D2D1_POINT_2F xhair52 = { tankOrigin.x - 163.5 + 141,tankOrigin.y - 163.5 + 141 };
+	D2D1_POINT_2F xhair61 = { tankOrigin.x + 163.5 - 15,tankOrigin.y - 163.5 + 15 }; // top right diag xhair
+	D2D1_POINT_2F xhair62 = { tankOrigin.x + 163.5 - 141,tankOrigin.y - 163.5 + 141 };
+	D2D1_POINT_2F xhair71 = { tankOrigin.x + 163.5 - 15,tankOrigin.y + 163.5 - 15 }; // bot right diag xhair
+	D2D1_POINT_2F xhair72 = { tankOrigin.x + 163.5 - 141,tankOrigin.y + 163.5 - 141 };
+	D2D1_POINT_2F xhair81 = { tankOrigin.x - 163.5 + 15,tankOrigin.y + 163.5 - 15 }; // bot left diag xhair
+	D2D1_POINT_2F xhair82 = { tankOrigin.x - 163.5 + 141,tankOrigin.y + 163.5 - 141 };
 	D2D1_RECT_F bottomStrip = D2D1::RectF(0, ps.rcPaint.bottom - bottomPadding, ps.rcPaint.right - rightPadding, ps.rcPaint.bottom);
 	D2D1_RECT_F rightStrip = D2D1::RectF(ps.rcPaint.right - rightPadding, 0, ps.rcPaint.right, ps.rcPaint.bottom);
 	D2D1_ELLIPSE tankRadius = { tankOriginPT,r,r };
@@ -220,8 +229,8 @@ void render(HDC& hdc, PAINTSTRUCT& ps) {
 	d2RenderTarget->FillRectangle(&bottomStrip, stripBrush);
 	d2RenderTarget->FillRectangle(&rightStrip, stripBrush);
 	d2RenderTarget->DrawText(dispStr, strSize, textFormat, bottomStrip, whiteBrush);
-	if (positioning) d2RenderTarget->DrawText(L"` to center\n\n\nRMB to auto-find center\n\narrows to adjust\n\n________\n\TAB to toggle", 79, textFormat, rightStrip, whiteBrush);
-	else d2RenderTarget->DrawText(L"` to invert gravity\n\n\\| to auto-aim\n\n\narrows to aim\n\n________\n\TAB to toggle", 75, textFormat, rightStrip, whiteBrush);
+	if (positioning) d2RenderTarget->DrawText(positioningToolTip, pttLen, textFormat, rightStrip, whiteBrush);
+	else d2RenderTarget->DrawText(aimingToolTip, attLen, textFormat, rightStrip, whiteBrush);
 
 	for (int i = 0; i < usedTrajCnt; ++i) {
 		// D2D1_ELLIPSE debugDot = { trajPoints[i],1,1 };
@@ -232,14 +241,14 @@ void render(HDC& hdc, PAINTSTRUCT& ps) {
 	// tank barrel radius, aim radius, crosshair
 	d2RenderTarget->DrawEllipse(tankRadius, greenBrush);
 	d2RenderTarget->DrawEllipse(aimRadius, yellowBrush);
-	d2RenderTarget->DrawLine(xhair11, xhair12, yellowBrush);
-	d2RenderTarget->DrawLine(xhair21, xhair22, yellowBrush);
-	d2RenderTarget->DrawLine(xhair31, xhair32, yellowBrush);
-	d2RenderTarget->DrawLine(xhair41, xhair42, yellowBrush);
-	d2RenderTarget->DrawLine(xhair51, xhair52, yellowBrush);
-	d2RenderTarget->DrawLine(xhair61, xhair62, yellowBrush);
-	d2RenderTarget->DrawLine(xhair71, xhair72, yellowBrush);
-	d2RenderTarget->DrawLine(xhair81, xhair82, yellowBrush);
+	d2RenderTarget->DrawLine(xhair11, xhair12, yellowBrush, 1, dashedStroke);
+	d2RenderTarget->DrawLine(xhair21, xhair22, yellowBrush, 1, dashedStroke);
+	d2RenderTarget->DrawLine(xhair31, xhair32, yellowBrush, 1, dashedStroke);
+	d2RenderTarget->DrawLine(xhair41, xhair42, yellowBrush, 1, dashedStroke);
+	d2RenderTarget->DrawLine(xhair51, xhair52, yellowBrush, 1, dashedStroke);
+	d2RenderTarget->DrawLine(xhair61, xhair62, yellowBrush, 1, dashedStroke);
+	d2RenderTarget->DrawLine(xhair71, xhair72, yellowBrush, 1, dashedStroke);
+	d2RenderTarget->DrawLine(xhair81, xhair82, yellowBrush, 1, dashedStroke);
 
 	// aim lines and point
 	d2RenderTarget->DrawLine(tankOriginPT, gameAimPT, pinkBrush);
@@ -378,7 +387,61 @@ void autoAim() {
 	SetForegroundWindow(RRhwnd);
 }
 
+void autoCenter() {
+	RRmat = CPmat(CProi);
+	resize(RRmat, RRmat, Size(), 0.5, 0.5, INTER_NEAREST);
+	cvtColor(RRmat, RRmat, COLOR_BGR2GRAY);
+	//threshold(RRmat, RRmat, 240, 255, THRESH_BINARY);
+	GaussianBlur(RRmat, RRmat, Size(3, 3), 0);
+	//imshow("f", RRmat);
+	Canny(RRmat, RRmat, 255, 85);
+	//imshow("RRmat", RRmat);
+	HoughCircles(RRmat, circles, HOUGH_GRADIENT, 2, 1000, 255, 30, detectRad - 1, detectRad + 1);
+	if (circles.size() > 0) {
+		tankOrigin.x = circles[0][0] * 2 + CProi.x;
+		tankOrigin.y = circles[0][1] * 2 + CProi.y;
+	}
+}
+
 bool tabToggle = true;
+void processHotkeys(WPARAM param) {
+	if (param == VK_TAB && tabToggle) { // no repeats
+		positioning = !positioning;
+		tabToggle = false;
+	}
+	else if (param == VK_OEM_5) { // \| key
+		positioning = false;
+		autoAim();
+	}
+	else if (positioning) {
+		if (param == VK_LEFT) tankOrigin.x -= 1;
+		else if (param == VK_RIGHT) tankOrigin.x += 1;
+		else if (param == VK_UP) tankOrigin.y -= 1;
+		else if (param == VK_DOWN) tankOrigin.y += 1;
+		else if (param == VK_OEM_3) { // `~ key
+			GetCursorPos(&tankOrigin);
+			ScreenToClient(RRhwnd, &tankOrigin);
+		}
+	}
+	else {
+		if (param >= VK_LEFT && param <= VK_DOWN) {
+			if (param == VK_LEFT) a -= 1;
+			else if (param == VK_RIGHT) a += 1;
+			else if (param == VK_UP) p += 1;
+			else if (param == VK_DOWN) p -= 1;
+
+			if (a < -90) a = 269;
+			else if (a > 269) a = -90;
+			if (p > 100)
+				p = 100;
+			else if (p < 0) p = 0;
+		}
+		else if (param == VK_OEM_3) { // `~ key
+			g = -g;
+		}
+	}
+}
+
 LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 	switch (msg) {
 	case WM_CREATE:
@@ -395,7 +458,12 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 			if (positioning) {
 				if (centering) { // bitwise or, to accumulate white aiming circle while right click held
 					BitBlt(CPdc, 0, 0, SSrc.right, SSrc.bottom - SStb, SSdc, 0, 0, SRCPAINT);
-					threshold(CPmat, CPmat, 245, 255, THRESH_TOZERO);
+					// threshold(CPmat, CPmat, 245, 255, THRESH_TOZERO);
+					threshold(CPmat, CPmat, 150, 255, THRESH_TOZERO);
+					if (++tryAutocenter > 9) { // detect every 10 cycles
+						tryAutocenter = 0;
+						autoCenter();
+					}
 				}
 				offStandby = true; // high update rate while positioning
 			}
@@ -432,83 +500,56 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 		return 0;
 
 	case WM_LBUTTONDOWN:
-		positioning = false;
-		SendMessage(SShwnd, WM_LBUTTONDOWN, param, lparam);
-		int x, y;
-		y = lparam >> 16;
-		x = lparam & 0x0000FFFF;
-		if (pow(y - tankOrigin.y, 2) + pow(x - tankOrigin.x, 2) <= aimCircle * aimCircle) aiming = true;
+		if (!RbtnDown) {
+			LbtnDown = true;
+			positioning = false;
+			SendMessage(SShwnd, WM_LBUTTONDOWN, param, lparam);
+			int x, y;
+			y = lparam >> 16;
+			x = lparam & 0x0000FFFF;
+			if (pow(y - tankOrigin.y, 2) + pow(x - tankOrigin.x, 2) <= aimCircle * aimCircle) aiming = true;
+		}
 		return 0;
 
 	case WM_LBUTTONUP:
-		SendMessage(SShwnd, WM_LBUTTONUP, param, lparam);
-		aiming = false;
+		if (!RbtnDown) {
+			LbtnDown = false;
+			SendMessage(SShwnd, WM_LBUTTONUP, param, lparam);
+			if (aiming) aiming = false;
+		}
 		return 0;
 
 	case WM_RBUTTONDOWN:
-		GetCursorPos(&curPos);
-		ScreenToClient(hwnd, &curPos);
-		SendMessage(SShwnd, WM_LBUTTONDOWN, param, lparam);
-		if (!centering) {
-			BitBlt(CPdc, 0, 0, SSrc.right, SSrc.bottom - SStb, SSdc, 0, 0, SRCCOPY);
-			// +,- 10 are as padding for if click at aiming circle edge
-			Point tl(max(0, (int)(curPos.x - 2 * aimCircle) - 10),
-				max(0, (int)(curPos.y - 2 * aimCircle) - 10));
-			Point br(min((int)(SSrc.right), (int)(curPos.x + 2 * aimCircle) + 10),
-				min((int)(SSrc.bottom) - SStb, (int)(curPos.y + 2 * aimCircle) + 10));
-			CProi = Rect(tl, br);
+		if (!LbtnDown) {
+			RbtnDown = true;
+			GetCursorPos(&curPos);
+			ScreenToClient(hwnd, &curPos);
+			SendMessage(SShwnd, WM_LBUTTONDOWN, param, lparam);
+			if (!centering) {
+				BitBlt(CPdc, 0, 0, SSrc.right, SSrc.bottom - SStb, SSdc, 0, 0, SRCCOPY);
+				// +,- 10 are as padding for if click at aiming circle edge
+				Point tl(max(0, (int)(curPos.x - 2 * aimCircle) - 10),
+					max(0, (int)(curPos.y - 2 * aimCircle) - 10));
+				Point br(min((int)(SSrc.right), (int)(curPos.x + 2 * aimCircle) + 10),
+					min((int)(SSrc.bottom) - SStb, (int)(curPos.y + 2 * aimCircle) + 10));
+				CProi = Rect(tl, br);
+			}
+			positioning = true;
+			centering = true;
 		}
-		positioning = true;
-		centering = true;
 		return 0;
 
 	case WM_RBUTTONUP:
-		centering = false;
-		SendMessage(SShwnd, WM_LBUTTONUP, param, lparam);
-		RRmat = CPmat(CProi);
-		resize(RRmat, RRmat, Size(), 0.5, 0.5, INTER_NEAREST);
-		cvtColor(RRmat, RRmat, COLOR_BGR2GRAY);
-		threshold(RRmat, RRmat, 240, 255, THRESH_BINARY);
-		GaussianBlur(RRmat, RRmat, Size(3, 3), 0);
-		imshow("f", RRmat);
-		Canny(RRmat, RRmat, 255, 85);
-		imshow("RRmat", RRmat);
+		if (!LbtnDown) {
+			RbtnDown = false;
+			centering = false;
+			SendMessage(SShwnd, WM_LBUTTONUP, param, lparam);
+		}
 		return 0;
 
 	case WM_KEYDOWN:
-		if (param == VK_TAB && tabToggle) { // no repeats
-			positioning = !positioning;
-			tabToggle = false;
-		}
-		else if (positioning) {
-			if (param == VK_LEFT) tankOrigin.x -= 1;
-			else if (param == VK_RIGHT) tankOrigin.x += 1;
-			else if (param == VK_UP) tankOrigin.y -= 1;
-			else if (param == VK_DOWN) tankOrigin.y += 1;
-			else if (param == VK_OEM_3) { // `~ key
-				GetCursorPos(&tankOrigin);
-				ScreenToClient(hwnd, &tankOrigin);
-			}
-		}
-		else {
-			if (param >= VK_LEFT && param <= VK_DOWN) {
-				if (param == VK_LEFT) a -= 1;
-				else if (param == VK_RIGHT) a += 1;
-				else if (param == VK_UP) p += 1;
-				else if (param == VK_DOWN) p -= 1;
-
-				if (a < -90) a = 269;
-				else if (a > 269) a = -90;
-				if (p > 100)
-					p = 100;
-				else if (p < 0) p = 0;
-			}
-			else if (param == VK_OEM_5) { // \| key
-				autoAim();
-			}
-			else if (param == VK_OEM_3) { // `~ key
-				g = -g;
-			}
+		if (!LbtnDown && !RbtnDown) {
+			processHotkeys(param);
 		}
 		return 0;
 
@@ -576,7 +617,7 @@ void setupD2D() {
 		&greenBrush
 	);
 	d2RenderTarget->CreateSolidColorBrush(
-		D2D1::ColorF(D2D1::ColorF::Yellow),
+		D2D1::ColorF(D2D1::ColorF::Gold),
 		&yellowBrush
 	);
 	yellowBrush->SetOpacity(0.5);
