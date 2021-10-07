@@ -9,8 +9,8 @@
 using namespace std;
 using namespace cv;
 constexpr float PI = 3.141592654f;
-constexpr float DEG2RAD = PI/180.0F;
-constexpr float RAD2DEG = 180.0F/PI;
+constexpr float DEG2RAD = PI / 180.0F;
+constexpr float RAD2DEG = 180.0F / PI;
 
 short a = 45;	// rounded value: angle (is -90 to 269 clockwise from left)
 unsigned short p = 50;	// rounded value: power
@@ -31,10 +31,12 @@ POINT curPos;	// mouse position
 POINT curAim;	// cursor for aiming
 bool aiming = false;	// if click+drag aiming
 POINT tankOrigin = { 100,100 };	// center of tank
-bool centering = false;	// if centering on tank
+bool positioning = false;	// if positioning on tank
+bool centering = false; // if holding right click, accumulating on mat
 
 constexpr int SSwid = 1350;	// game wid
 constexpr int SShgt = 760;	// game hgt
+constexpr int SStb = 108;	// in-game toolbar hgt
 RECT SSrc; // game client size
 RECT RRrc; // ruler client size
 constexpr int rightPadding = 160;	// right strip wid
@@ -48,7 +50,9 @@ HDC SSdc;		// game device context
 HDC CPdc;			// clone of SSdc
 HBITMAP CPbmp;		// bitmap of game
 void* CPbmpPixels;	// pointer to pixels
-cv::Mat CPmat;		// mat of game
+Mat CPmat;		// mat of game // don't modify
+Rect2i CProi;	// roi of aiming circle
+Mat RRmat;		// mat of game to process
 
 ID2D1DCRenderTarget* d2RenderTarget;
 IDWriteTextFormat* textFormat;
@@ -97,13 +101,13 @@ int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR c
 	BITMAPINFO bi;
 	ZeroMemory(&bi, sizeof(BITMAPINFO));
 	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-	bi.bmiHeader.biWidth = SSrc.right - SSrc.left;
-	bi.bmiHeader.biHeight = -(SSrc.bottom - SSrc.top);  //neg indicating a top-down DIB, so (0,0) is at top left
+	bi.bmiHeader.biWidth = SSrc.right;
+	bi.bmiHeader.biHeight = -(SSrc.bottom);  //neg indicating a top-down DIB, so (0,0) is at top left
 	bi.bmiHeader.biPlanes = 1;
 	bi.bmiHeader.biBitCount = 32;
 	CPbmp = CreateDIBSection(SSdc, &bi, DIB_RGB_COLORS, &CPbmpPixels, NULL, 0);
 	SelectObject(CPdc, CPbmp);
-	CPmat = Mat(SSrc.bottom - SSrc.top, SSrc.right - SSrc.left, CV_8UC4, CPbmpPixels, 0);
+	CPmat = Mat(SSrc.bottom, SSrc.right, CV_8UC4, CPbmpPixels, 0);
 
 	WNDCLASS wc{};
 	wc.hInstance = currentInstance;
@@ -130,23 +134,23 @@ int WINAPI WinMain(HINSTANCE currentInstance, HINSTANCE previousInstance, PSTR c
 	return 0;
 }
 
-void render(HDC &hdc, PAINTSTRUCT &ps) {
+void render(HDC& hdc, PAINTSTRUCT& ps) {
 	float aimDist = sqrtf(pow(curAim.y - tankOrigin.y, 2) + pow(curAim.x - tankOrigin.x, 2));
 	float angle = roundf(atan2f(curAim.y - tankOrigin.y, curAim.x - tankOrigin.x) * RAD2DEG);
 
-	if (aiming) {	
+	if (aiming) {
 		p = min(roundf(aimDist * 100.0f / aimCircle), 100.0f);
 		a = angle + 90;
 	}
 	else {
 		angle = a - 90;
 	}
-	
+
 	i = cosf(a * DEG2RAD);
 	j = sinf(a * DEG2RAD);
 	float t = 0;
 	trajIndex = 0;
-	D2D1_POINT_2F *b, *c;
+	D2D1_POINT_2F* b, * c;
 	while (trajIndex < maxTrajPoints) {
 		// calc next pos
 		float ax = tankOrigin.x + j * r + j * (p + ((g > 0) ? 1 : 0)) * t + w * t * t; // 1 less power
@@ -197,7 +201,7 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 	D2D1_POINT_2F xhair72 = { tankOrigin.x + 163.5 - 20,tankOrigin.y + 163.5 - 20 };
 	D2D1_POINT_2F xhair81 = { tankOrigin.x - 163.5 + 10,tankOrigin.y + 163.5 - 10 }; // bot left diag xhair
 	D2D1_POINT_2F xhair82 = { tankOrigin.x - 163.5 + 20,tankOrigin.y + 163.5 - 20 };
-	D2D1_RECT_F bottomStrip = D2D1::RectF(0, ps.rcPaint.bottom - bottomPadding, ps.rcPaint.right-rightPadding, ps.rcPaint.bottom);
+	D2D1_RECT_F bottomStrip = D2D1::RectF(0, ps.rcPaint.bottom - bottomPadding, ps.rcPaint.right - rightPadding, ps.rcPaint.bottom);
 	D2D1_RECT_F rightStrip = D2D1::RectF(ps.rcPaint.right - rightPadding, 0, ps.rcPaint.right, ps.rcPaint.bottom);
 	D2D1_ELLIPSE tankRadius = { tankOriginPT,r,r };
 	D2D1_ELLIPSE aimRadius = { tankOriginPT,aimCircle,aimCircle };
@@ -216,7 +220,7 @@ void render(HDC &hdc, PAINTSTRUCT &ps) {
 	d2RenderTarget->FillRectangle(&bottomStrip, stripBrush);
 	d2RenderTarget->FillRectangle(&rightStrip, stripBrush);
 	d2RenderTarget->DrawText(dispStr, strSize, textFormat, bottomStrip, whiteBrush);
-	if(centering) d2RenderTarget->DrawText(L"` to center\n\n\n\\| to auto-find center\n\narrows to adjust\n\n________\n\TAB to toggle", 78, textFormat, rightStrip, whiteBrush);
+	if (positioning) d2RenderTarget->DrawText(L"` to center\n\n\nRMB to auto-find center\n\narrows to adjust\n\n________\n\TAB to toggle", 79, textFormat, rightStrip, whiteBrush);
 	else d2RenderTarget->DrawText(L"` to invert gravity\n\n\\| to auto-aim\n\n\narrows to aim\n\n________\n\TAB to toggle", 75, textFormat, rightStrip, whiteBrush);
 
 	for (int i = 0; i < usedTrajCnt; ++i) {
@@ -260,7 +264,7 @@ const int vks[keyCnt] = { VK_BACK, VK_RETURN, VK_LSHIFT, VK_RSHIFT, VK_LCONTROL,
 							0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, // A-M
 							0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, // N-Z
 							VK_OEM_1, VK_OEM_PLUS, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD,
-							VK_OEM_2, VK_OEM_4, /*VK_OEM_5,*/ VK_OEM_6, VK_OEM_7};
+							VK_OEM_2, VK_OEM_4, /*VK_OEM_5,*/ VK_OEM_6, VK_OEM_7 };
 bool isDown[keyCnt] = { 0 };
 bool isSim[keyCnt] = { 0 };
 bool keyIsDown = false;
@@ -323,7 +327,7 @@ void autoAim() {
 	else  edgey = screenRC.bottom; // bot
 	if (a >= 0 && a < 180)  edgex = screenRC.right;  // right
 	else  edgex = screenRC.left; //left
-	
+
 	long dy = edgey - toClick.y;
 	long dx = edgex - toClick.x;
 	clickDist = min(clickDist, sqrtf(powf(dy / slope, 2) + powf(dy, 2)));
@@ -387,9 +391,13 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 		return 0;
 
 	case WM_TIMER:
-		if (centering || !processKeys()) { // if ruler window shown
-			if (centering) {
-				offStandby = true; // high update rate while centering
+		if (positioning || !processKeys()) { // if ruler window shown
+			if (positioning) {
+				if (centering) { // bitwise or, to accumulate white aiming circle while right click held
+					BitBlt(CPdc, 0, 0, SSrc.right, SSrc.bottom - SStb, SSdc, 0, 0, SRCPAINT);
+					threshold(CPmat, CPmat, 245, 255, THRESH_TOZERO);
+				}
+				offStandby = true; // high update rate while positioning
 			}
 
 			else if (aiming) {
@@ -412,7 +420,11 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 		PAINTSTRUCT ps;
 		hdc = BeginPaint(hwnd, &ps);
 
-		BitBlt(hdc, 0, 0, SSrc.right - SSrc.left, SSrc.bottom - SSrc.top, SSdc, 0, 0, SRCCOPY);
+		
+		BitBlt(hdc, 0, 0, SSrc.right, SSrc.bottom, SSdc, 0, 0, SRCCOPY);
+		if (centering) {
+			BitBlt(hdc, CProi.x, CProi.y, CProi.width, CProi.height, CPdc, CProi.x, CProi.y, SRCPAINT);
+		}
 		render(hdc, ps);
 
 		EndPaint(hwnd, &ps);
@@ -420,7 +432,7 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 		return 0;
 
 	case WM_LBUTTONDOWN:
-		centering = false;
+		positioning = false;
 		SendMessage(SShwnd, WM_LBUTTONDOWN, param, lparam);
 		int x, y;
 		y = lparam >> 16;
@@ -434,19 +446,41 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 		return 0;
 
 	case WM_RBUTTONDOWN:
+		GetCursorPos(&curPos);
+		ScreenToClient(hwnd, &curPos);
+		SendMessage(SShwnd, WM_LBUTTONDOWN, param, lparam);
+		if (!centering) {
+			BitBlt(CPdc, 0, 0, SSrc.right, SSrc.bottom - SStb, SSdc, 0, 0, SRCCOPY);
+			// +,- 10 are as padding for if click at aiming circle edge
+			Point tl(max(0, (int)(curPos.x - 2 * aimCircle) - 10),
+				max(0, (int)(curPos.y - 2 * aimCircle) - 10));
+			Point br(min((int)(SSrc.right), (int)(curPos.x + 2 * aimCircle) + 10),
+				min((int)(SSrc.bottom) - SStb, (int)(curPos.y + 2 * aimCircle) + 10));
+			CProi = Rect(tl, br);
+		}
+		positioning = true;
+		centering = true;
 		return 0;
 
 	case WM_RBUTTONUP:
-		BitBlt(CPdc, 0, 0, SSrc.right - SSrc.left, SSrc.bottom - SSrc.top, SSdc, 0, 0, SRCCOPY);
-		cv::imshow("CPmat",CPmat);
+		centering = false;
+		SendMessage(SShwnd, WM_LBUTTONUP, param, lparam);
+		RRmat = CPmat(CProi);
+		resize(RRmat, RRmat, Size(), 0.5, 0.5, INTER_NEAREST);
+		cvtColor(RRmat, RRmat, COLOR_BGR2GRAY);
+		threshold(RRmat, RRmat, 240, 255, THRESH_BINARY);
+		GaussianBlur(RRmat, RRmat, Size(3, 3), 0);
+		imshow("f", RRmat);
+		Canny(RRmat, RRmat, 255, 85);
+		imshow("RRmat", RRmat);
 		return 0;
 
 	case WM_KEYDOWN:
 		if (param == VK_TAB && tabToggle) { // no repeats
-			centering = !centering;
+			positioning = !positioning;
 			tabToggle = false;
 		}
-		else if (centering) {
+		else if (positioning) {
 			if (param == VK_LEFT) tankOrigin.x -= 1;
 			else if (param == VK_RIGHT) tankOrigin.x += 1;
 			else if (param == VK_UP) tankOrigin.y -= 1;
@@ -465,7 +499,7 @@ LRESULT CALLBACK MsgCallback(HWND hwnd, UINT msg, WPARAM param, LPARAM lparam) {
 
 				if (a < -90) a = 269;
 				else if (a > 269) a = -90;
-				if (p > 100) 
+				if (p > 100)
 					p = 100;
 				else if (p < 0) p = 0;
 			}
@@ -504,11 +538,11 @@ void setupD2D() {
 	ID2D1Factory* d2Factory;
 	D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &d2Factory);
 
-	IDWriteFactory *d2WriteFactory;
+	IDWriteFactory* d2WriteFactory;
 	DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(d2WriteFactory), reinterpret_cast<IUnknown**>(&d2WriteFactory));
 	d2WriteFactory->CreateTextFormat(L"Consolas", nullptr,
 		DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-		30,L"",&textFormat);
+		30, L"", &textFormat);
 	textFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
 	textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
@@ -519,7 +553,7 @@ void setupD2D() {
 
 	d2Factory->CreateStrokeStyle(D2D1::StrokeStyleProperties(
 		D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_FLAT,
-		D2D1_LINE_JOIN_MITER,10.0F, D2D1_DASH_STYLE_CUSTOM,0.0f), &r, 1, &dashedStroke);
+		D2D1_LINE_JOIN_MITER, 10.0F, D2D1_DASH_STYLE_CUSTOM, 0.0f), &r, 1, &dashedStroke);
 
 	d2RenderTarget->CreateSolidColorBrush(
 		D2D1::ColorF(D2D1::ColorF::DimGray),
